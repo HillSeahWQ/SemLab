@@ -1,7 +1,7 @@
-# RAGLab — A Framework for Multimodal Semantic Retrieval Experiments
+# SemantIQ — A Framework for Multimodal Semantic Retrieval Experiments
 
 ## Overview
-**RAGLab** is a modular and extensible framework designed to **benchmark and optimize** the semantic retrieval components of **Retrieval-Augmented Generation (RAG)** systems.  
+**SemantIQ** is a modular and extensible framework designed to benchmark and optimize **semantic retrieval** of systems like RAG, Recommendation Systems, ... etc
 It enables rapid experimentation across all stages of the retrieval pipeline — from **document loading and multimodal chunking**, to **embedding generation** and **vector database indexing**.
 
 ## Key Features
