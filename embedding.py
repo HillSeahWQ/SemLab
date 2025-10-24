@@ -1,6 +1,6 @@
 """
 Text embedding module.
-Supports multiple embedding providers (OpenAI, Sentence Transformers).
+Supports multiple embedding providers (OpenAI, Sentence Transformers). 
 """
 import numpy as np
 from typing import List
