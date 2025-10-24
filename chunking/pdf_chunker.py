@@ -156,9 +156,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 from .base import BaseChunker, Chunk, ChunkMetadata, ChunkType
+from utils.logger import get_logger
 
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 
 @dataclass
 class PDFChunkMetadata(ChunkMetadata):
