@@ -1,16 +1,56 @@
-# RAG Pipeline - Multimodal Document Processing
+# RAGLab — A Framework for Multimodal Semantic Retrieval Experiments
 
-A production-ready RAG (Retrieval-Augmented Generation) pipeline with support for multimodal PDF processing, flexible embedding models, and Milvus vector storage.
+## Overview
+**RAGLab** is a modular and extensible framework designed to **benchmark and optimize** the semantic retrieval components of **Retrieval-Augmented Generation (RAG)** systems.  
+It enables rapid experimentation across all stages of the retrieval pipeline — from **document loading and multimodal chunking**, to **embedding generation** and **vector database indexing**.
 
-## Features
+## Key Features
 
-✅ **Modular Architecture**: Separate concerns for chunking, embedding, and storage  
-✅ **Multimodal PDF Processing**: Text, tables, and vision-based image processing  
-✅ **Flexible Embeddings**: OpenAI, Sentence Transformers, easily extensible  
-✅ **Auto Schema Generation**: Vector DB schema created from chunk metadata  
-✅ **Comprehensive Logging**: Full pipeline observability  
-✅ **Reusable Components**: Chunk once, re-embed multiple times  
-✅ **Experiment Tracking**: Configuration-driven experimentation  
+- **Flexible Document Ingestion** — Supports multiple file types (PDF, DOCX, images, tables, etc.) with customizable chunking strategies.  
+- **Pluggable Embedding Models** — Swap between text and multimodal embedding models for comparative evaluation.  
+- **Configurable Vector Stores** — Test across FAISS, Milvus, Chroma, and others with adjustable indexing strategies and hyperparameters.  
+- **Evaluation & Logging** — Built-in tools for reproducible experiments, retrieval quality metrics, and performance tracking.  
+
+## Goal
+To systematically study how **chunking**, **embedding**, and **vector indexing** choices affect semantic retrieval quality and efficiency in RAG pipelines.
+
+---
+
+## 🧩 Current Implementations
+
+### 1. File Types
+
+**PDF**
+- Multimodal: Text, Images, Tables  
+- Vision-Enhanced Chunking: Automatic vision processing for image-heavy pages (based on area threshold)  
+- Table Extraction: Preserves tables in Markdown format  
+- Chunking by page  
+
+*Extensible: Easily add DOCX, code files, HTML, and more.*
+
+---
+
+### 2. Embedding Models
+
+**OpenAI Embeddings**  
+- `text-embedding-3-large` / `text-embedding-3-small`
+
+**Sentence Transformers (HuggingFace)**  
+- Compatible with a variety of transformer-based models  
+
+*Extensible: Add code or domain-specific embeddings.*
+
+---
+
+### 3. Vector Database Support
+
+**Milvus**  
+- Local standalone setup via Docker container  
+
+*Extensible: Add FAISS, Chroma, or other vector databases with configurable parameters.*
+
+---
+
 
 ## Quick Start
 
