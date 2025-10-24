@@ -16,7 +16,7 @@ To systematically study how **chunking**, **embedding**, and **vector indexing**
 
 ---
 
-## 🧩 Current Implementations
+## Current Implementations
 
 ### 1. File Types
 
@@ -50,7 +50,6 @@ To systematically study how **chunking**, **embedding**, and **vector indexing**
 *Extensible: Add FAISS, Chroma, or other vector databases with configurable parameters.*
 
 ---
-
 
 ## Quick Start
 
@@ -104,16 +103,16 @@ CHUNKING_CONFIG = {
 ### 4. Run Ingestion Pipeline
 
 ```bash
-# Full pipeline: Chunk → Embed → Ingest (split up in case want to test different vector DB/embedding model with existing chunks after run_chunking.py)
+# Full pipeline: Chunk → Embed → Ingest (split up in case you want to test different vector DB/embedding model with existing chunks after run_chunking.py)
 uv run scripts/run_chunking.py
-uv run scripts/run_milvus_implementation.py
+uv run scripts/run_ingestion_milvus.py 
 ```
 
 ### 5. Query Your Data
 
 ```bash
 # Run example queries
-uv run scripts/query_milvus.py
+uv run scripts/run_query_milvus.py 
 ```
 
 Or programmatically:
@@ -130,26 +129,31 @@ results = query_collection(
 ## Project Structure
 
 ```
-rag-pipeline/
-├── config.py                 # ⚙️  Central configuration
-├── chunking/                 # 📄 Document processing
-│   ├── base.py              # Base classes
-│   └── pdf_chunker.py       # PDF implementation
-├── embedding/                # 🔢 Vector embeddings
+RAGLab/
+├── config.py                   # Central configuration - edit for experimentation
+├── chunking/                   # Document processing + chunking
+|   ├── __init__.py            
+│   ├── base.py                 # Base classes
+│   └── pdf_chunker.py          # PDF implementation
+├── embedding/                  # Vector embeddings
+|   ├── __init__.py
 │   └── embedding_manager.py
-├── vector_db/                # 💾 Database clients
-│   └── milvus_client.py
-├── utils/                    # 🛠️  Utilities
+├── vector_db/                   # Database clients
+|   ├── __init__.py
+│   └── milvus_client.py         # [Milvus] connection + disconnect + ingest (schema creation, insert data, index creation) + query/search 
+├── utils/                       # Utilities
+|   ├── __init__.py
+|   ├── logger.py                  
 │   └── storage.py
-└── scripts/                  # 🚀 Executable scripts
-    ├── run_pipeline.py      # Main pipeline
-    ├── query_milvus.py      # Query interface
-    └── re_embed_and_ingest.py  # Re-embedding
+└── scripts/                     # Executable scripts
+    ├── run_chunking.py          # Entry 1 - Chunking Interface
+    ├── run_ingestion_milvus.py  # Entry 2 - Embedding + VectorDB ingestion Interface
+    └── run_query_milvus.py      # Entry 3 - Querying Interface
 ```
 
 ## Use Cases
 
-### 1. Experiment with Different Embeddings Models
+### 1. Experiment with Different Embedding Models
 
 1. Implement a new base embedder model in `embedding/embedding_manager.py`:
 
@@ -175,16 +179,16 @@ class NewEmbedder(BaseEmbedder):
 # 1. (DO NOT RE_RUN IF RAN ONCE BEFORE) Chunk documents once 
 uv run scripts/run_chunking.py
 
-# 2. Change embedding model in config.py
+# 2. Change the embedding model in config.py
 # ACTIVE_EMBEDDING_PROVIDER = "new-embedding-model"
 
 # 3. Embed and ingest without re-chunking
-uv run scripts/run_milvus_ingestion.py
+uv run scripts/run_ingestion_milvus.py 
 ```
 
 ### 2. Process New Document Types
 
-1. Create new chunker in `chunking/`:
+1. Create a new chunker in `chunking/`:
 
 ```python
 from chunking.base import BaseChunker
@@ -200,15 +204,15 @@ class MyChunker(BaseChunker):
 
 2. Add to config and use!
 - Add in CHUNKING_CONFIG, chunker to use for new document type
-- Add in EMBEDDING_CONFIG, embedding model to use for new document type
+- Add in EMBEDDING_CONFIG, the embedding model to use for the new document type
 
 ### 3. Switch Vector Databases
 
-1. Create new client in `vector_db/`:
+1. Create a new client in `vector_db/`:
 
 ```python
 class PineconeClient:
-    # Implement same interface as MilvusClient
+    # Implement the same interface as MilvusClient
     pass
 ```
 
