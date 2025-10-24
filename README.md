@@ -140,7 +140,7 @@ RAGLab/
 │   └── embedding_manager.py
 ├── vector_db/                   # Database clients
 |   ├── __init__.py
-│   └── milvus_client.py         # [Milvus] connection + disconnect + ingest (schema creation, insert data, index creation) + query/search 
+│   └── milvus_client.py         # [Milvus] connection + disconnect + ingest + query/search 
 ├── utils/                       # Utilities
 |   ├── __init__.py
 |   ├── logger.py                  
