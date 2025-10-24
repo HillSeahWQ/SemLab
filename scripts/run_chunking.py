@@ -41,7 +41,7 @@ def main(
     load_dotenv()
     
     logger.info("="*80)
-    logger.info("🚀 DOCUMENT CHUNKING PIPELINE")
+    logger.info("DOCUMENT CHUNKING PIPELINE")
     logger.info("="*80)
     logger.info(f"Experiment: {EXPERIMENT_CONFIG['name']}")
     logger.info(f"Description: {EXPERIMENT_CONFIG['description']}")
