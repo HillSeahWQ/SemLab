@@ -1,250 +1,348 @@
-# RAG Pipeline with Milvus
+# RAG Pipeline - Multimodal Document Processing
 
-A modular, reusable RAG (Retrieval-Augmented Generation) pipeline for document processing, embedding, and vector search using Milvus.
+A production-ready RAG (Retrieval-Augmented Generation) pipeline with support for multimodal PDF processing, flexible embedding models, and Milvus vector storage.
 
-## Project Structure
+## Features
 
-```
-project/
-├── config.py                 # Configuration file for all parameters
-├── requirements.txt          # Python dependencies
-├── README.md                # This file
-│
-├── utils/
-│   └── logger.py            # Logging utilities
-│
-├── chunking.py              # Document chunking module
-├── embedding.py             # Text embedding module (OpenAI, Sentence Transformers)
-│
-├── vector_db/
-│   ├── __init__.py
-│   ├── milvus_connection.py # Milvus connection management
-│   ├── milvus_ingestion.py  # Milvus data ingestion
-│   └── milvus_query.py      # Milvus vector search
-│
-├── scripts/
-│   ├── run_chunking.py      # Run chunking pipeline
-│   ├── run_ingestion.py     # Run embedding + ingestion
-│   └── run_query.py         # Run queries
-│
-└── data/
-    ├── kyndryl-docs-test/   # Input PDFs (your directory)
-    └── chunks/              # Generated chunks (JSON)
-```
+✅ **Modular Architecture**: Separate concerns for chunking, embedding, and storage  
+✅ **Multimodal PDF Processing**: Text, tables, and vision-based image processing  
+✅ **Flexible Embeddings**: OpenAI, Sentence Transformers, easily extensible  
+✅ **Auto Schema Generation**: Vector DB schema created from chunk metadata  
+✅ **Comprehensive Logging**: Full pipeline observability  
+✅ **Reusable Components**: Chunk once, re-embed multiple times  
+✅ **Experiment Tracking**: Configuration-driven experimentation  
 
-## Setup
+## Quick Start
 
-### 1. Install Dependencies
+### 1. Installation
 
 ```bash
+# Clone repository
+git clone <your-repo>
+cd rag-pipeline
+
+# Install dependencies
 uv sync
+
+# Setup environment variables
+cat > .env << EOF
+OPENAI_API_KEY=your_openai_key_here
+EOF
 ```
 
-### 2. Set Environment Variables
-
-Create a `.env` file in the project root:
+### 2. Start Milvus
 
 ```bash
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-### 3. Start Milvus
-
-Ensure Milvus is running (via Docker):
-
-```bash
-# Example using docker-compose
+# Using Docker Compose (recommended)
+# Download docker-compose.yml from Milvus documentation
 docker-compose up -d
+
+# Verify Milvus is running
+curl http://localhost:19530/healthz
 ```
 
-### 4. Configure Pipeline
+### 3. Configure Pipeline
 
-Edit `config.py` to customize:
-- **Paths**: Input/output directories
-- **Chunking**: Image threshold, vision model
-- **Embedding**: Provider (OpenAI/Sentence Transformers), model, batch size
-- **Milvus**: Host, port, collection name, index type, similarity metric
-- **Search**: Top-k results, output fields
-
-## Usage
-
-### Step 1: Chunk Documents
-
-```bash
-python scripts/run_chunking.py
-```
-
-This will:
-- Process all PDFs in `INPUT_DIR`
-- Generate chunks with metadata
-- Save to `data/chunks/kyndryl_chunks.json`
-
-### Step 2: Embed and Ingest
-
-```bash
-python scripts/run_ingestion.py
-```
-
-This will:
-- Load chunks from JSON
-- Generate embeddings using configured provider
-- Create/update Milvus collection
-- Build vector index
-
-### Step 3: Query
-
-```bash
-python scripts/run_query.py
-```
-
-Edit queries in `run_query.py` or create your own query script.
-
-## Configuration Examples
-
-### Use Sentence Transformers Instead of OpenAI
-
-In `config.py`:
+Edit `config.py`:
 
 ```python
-EMBEDDING = {
-    "provider": "sentence_transformers",
-    "model": "sentence-transformers/all-MiniLM-L6-v2",
-    "batch_size": 64,
-    "normalize_embeddings": True
-}
-```
+# Set your input directory
+INPUT_DIR = DATA_DIR / "your-documents"
 
-### Use HNSW Index Instead of IVF_FLAT
+# Choose embedding model
+ACTIVE_EMBEDDING_PROVIDER = "openai"  # or "sentence_transformers"
 
-In `config.py`:
-
-```python
-MILVUS = {
-    # ... other settings
-    "index_type": "HNSW",
-    "index_params": {
-        "M": 16,
-        "efConstruction": 200
-    },
-    "search_params": {
-        "ef": 200
+# Configure chunking
+CHUNKING_CONFIG = {
+    "pdf": {
+        "image_coverage_threshold": 0.15,  # Adjust for your needs
+        "vision_model": "gpt-4o",
     }
 }
 ```
 
-### Change Similarity Metric
+### 4. Run Ingestion Pipeline
 
-In `config.py`:
+```bash
+# Full pipeline: Chunk → Embed → Ingest (split up in case want to test different vector DB/embedding model with existing chunks after run_chunking.py)
+uv run scripts/run_chunking.py
+uv run scripts/run_milvus_implementation.py
+```
+
+### 5. Query Your Data
+
+```bash
+# Run example queries
+uv run scripts/query_milvus.py
+```
+
+Or programmatically:
 
 ```python
-MILVUS = {
-    # ... other settings
-    "similarity_metric": "COSINE",  # Options: "IP", "L2", "COSINE"
+from scripts.query_milvus import query_collection
+
+results = query_collection(
+    queries=["What is covered by insurance?"],
+    top_k=5
+)
+```
+
+## Project Structure
+
+```
+rag-pipeline/
+├── config.py                 # ⚙️  Central configuration
+├── chunking/                 # 📄 Document processing
+│   ├── base.py              # Base classes
+│   └── pdf_chunker.py       # PDF implementation
+├── embedding/                # 🔢 Vector embeddings
+│   └── embedding_manager.py
+├── vector_db/                # 💾 Database clients
+│   └── milvus_client.py
+├── utils/                    # 🛠️  Utilities
+│   └── storage.py
+└── scripts/                  # 🚀 Executable scripts
+    ├── run_pipeline.py      # Main pipeline
+    ├── query_milvus.py      # Query interface
+    └── re_embed_and_ingest.py  # Re-embedding
+```
+
+## Use Cases
+
+### 1. Experiment with Different Embeddings Models
+
+1. Implement a new base embedder model in `embedding/embedding_manager.py`:
+
+```python
+class NewEmbedder(BaseEmbedder):
+    
+    def embed(self, texts: List[str]) -> np.ndarray:
+        pass
+    
+    def get_dimension(self) -> int:
+        """Return the embedding dimension."""
+        pass
+    
+    def model_name(self) -> str:
+        """Return the model name."""
+        pass
+
+```
+
+2. Re-Embed and ingest without re-chunking
+
+```bash
+# 1. (DO NOT RE_RUN IF RAN ONCE BEFORE) Chunk documents once 
+uv run scripts/run_chunking.py
+
+# 2. Change embedding model in config.py
+# ACTIVE_EMBEDDING_PROVIDER = "new-embedding-model"
+
+# 3. Embed and ingest without re-chunking
+uv run scripts/run_milvus_ingestion.py
+```
+
+### 2. Process New Document Types
+
+1. Create new chunker in `chunking/`:
+
+```python
+from chunking.base import BaseChunker
+
+class MyChunker(BaseChunker):
+    def chunk(self, file_path):
+        # Your implementation
+        pass
+    
+    def get_metadata_schema(self):
+        return {"field1": str, "field2": int}
+```
+
+2. Add to config and use!
+- Add in CHUNKING_CONFIG, chunker to use for new document type
+- Add in EMBEDDING_CONFIG, embedding model to use for new document type
+
+### 3. Switch Vector Databases
+
+1. Create new client in `vector_db/`:
+
+```python
+class PineconeClient:
+    # Implement same interface as MilvusClient
+    pass
+```
+
+2. Update imports in scripts
+3. No changes needed to chunking/embedding!
+
+## Configuration Guide
+
+### Chunking Parameters
+
+```python
+CHUNKING_CONFIG = {
+    "pdf": {
+        "image_coverage_threshold": 0.15,  # Trigger vision at 15% image coverage
+        "vision_model": "gpt-4o",         # Vision model for image-heavy pages
+        "log_level": "INFO"
+    }
 }
 ```
 
-## Extensibility
-
-### Adding New Embedding Providers
-
-1. Create a new class in `embedding.py` inheriting from `EmbeddingProvider`
-2. Implement the `embed()` method
-3. Add to `get_embedding_provider()` factory function
+### Embedding Options
 
 ```python
-class CustomProvider(EmbeddingProvider):
-    def embed(self, texts: List[str]) -> np.ndarray:
-        # Your implementation
-        pass
+# OpenAI embeddings
+EMBEDDING_CONFIG = {
+    "text": {
+        "openai": {
+            "model": "text-embedding-3-large",  # 3072 dim
+            "batch_size": 64,
+            "normalize": True
+        }
+    }
+}
+
+# Sentence Transformers
+EMBEDDING_CONFIG = {
+    "text": {
+        "sentence_transformers": {
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "batch_size": 64,
+            "normalize": True
+        }
+    }
+}
 ```
 
-### Adding New Vector Databases
+### Vector Index Configuration
 
-1. Create new modules: `vector_db/newdb_connection.py`, `vector_db/newdb_ingestion.py`, `vector_db/newdb_query.py`
-2. Follow the same interface patterns as Milvus modules
-3. Create corresponding run scripts in `scripts/`
+```python
+MILVUS_CONFIG = {
+    "index": {
+        "type": "IVF_FLAT",        # Options: HNSW, IVF_FLAT, IVF_PQ
+        "metric_type": "IP",        # Options: IP, L2, COSINE
+        "params": {"nlist": 1024}  # Index-specific parameters
+    }
+}
+```
+
+## Extending the Pipeline
 
 ### Adding Hybrid Search
 
-The current architecture supports extension to hybrid search:
+1. Create `vector_db/hybrid_search.py`
+2. Implement BM25 + dense retrieval
+3. Use existing components for dense vectors
 
-1. Add BM25/keyword search module alongside vector search
-2. Combine results in a new `hybrid_query.py` module
-3. Configure hybrid parameters in `config.py`
+### Adding Code Embeddings
 
-## Logging
-
-Logging is configured in `config.py`:
+1. Extend `embedding_manager.py`:
 
 ```python
-LOGGING = {
-    "level": "INFO",  # DEBUG, INFO, WARNING, ERROR
-    "format": "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    "date_format": "%Y-%m-%d %H:%M:%S"
+class CodeEmbedder(BaseEmbedder):
+    def embed(self, texts):
+        # Use code-specific model
+        pass
+```
+
+2. Update config:
+
+```python
+EMBEDDING_CONFIG = {
+    "code": {
+        "openai": {"model": "text-embedding-3-large"}
+    }
 }
 ```
 
-## Notes
+### Custom Metadata Fields
 
-- **Storage**: Currently stores full chunk text in Milvus. For production, consider external storage (S3, MinIO) and store only references.
-- **Costs**: OpenAI embedding costs depend on model and text volume. Monitor usage.
-- **Performance**: Adjust batch sizes and index parameters based on your dataset size and query patterns.
-- **Testing**: Set `drop_existing: True` in config for testing (recreates collection each time)
+Just extend the metadata class:
 
-## Quick Start Commands
+```python
+@dataclass
+class MyPDFMetadata(PDFChunkMetadata):
+    custom_field: str = ""
+    another_field: int = 0
+```
+
+Schema automatically generated in Milvus!
+
+## Logging
+
+Logs are written to:
+- Console (INFO level)
+- File: `logs/rag_pipeline.log` (DEBUG level)
+
+Configure in `config.py`:
+
+```python
+LOGGING_CONFIG = {
+    "handlers": {
+        "console": {"level": "INFO"},
+        "file": {"level": "DEBUG"}
+    }
+}
+```
+
+## Troubleshooting
+
+### Milvus Connection Failed
 
 ```bash
-# 1. Chunk documents
-python scripts/run_chunking.py
+# Check if Milvus is running
+docker ps | grep milvus
 
-# 2. Embed and ingest
-python scripts/run_ingestion.py
-
-# 3. Query
-python scripts/run_query.py
-```
+# Restart Milvus
+docker-compose restart
 ```
 
----
+### Out of Memory During Embedding
 
-## Installation Instructions
+Reduce batch size in `config.py`:
 
-### Create the project structure:
-
-```bash
-# Create directories
-mkdir -p project/utils project/vector_db project/scripts project/data/kyndryl-docs-test project/data/chunks
-
-# Navigate to project directory
-cd project
-
-# Create __init__.py files
-touch vector_db/__init__.py
+```python
+EMBEDDING_CONFIG = {
+    "text": {
+        "openai": {
+            "batch_size": 32  # Lower if needed
+        }
+    }
+}
 ```
 
-### Copy each file above into its respective location
+### Vision Processing Errors
 
-### Install dependencies:
+Check OpenAI API key and rate limits:
+- GPT-4o vision requires valid API access
+- Consider reducing `image_coverage_threshold` to process fewer pages with vision
 
-```bash
-pip install -r requirements.txt
-```
+## Performance Tips
 
-### Create .env file with your OpenAI API key
+1. **Chunk Reuse**: Save chunks to avoid re-processing documents
+2. **Batch Size**: Tune embedding batch size for your hardware
+3. **Index Selection**: 
+   - HNSW: Best for accuracy, slower build
+   - IVF_FLAT: Balanced
+   - IVF_PQ: Fastest, uses quantization
+4. **Vision Processing**: Only use for truly image-heavy pages (adjust threshold)
 
-### Run the pipeline:
+## License
 
-```bash
-# Step 1: Chunk
-python scripts/run_chunking.py
+MIT License - see LICENSE file
 
-# Step 2: Embed & Ingest
-python scripts/run_ingestion.py
+## Contributing
 
-# Step 3: Query
-python scripts/run_query.py
-```
+Contributions welcome! Please:
+1. Follow the modular architecture
+2. Add tests for new features
+3. Update documentation
+4. Follow PEP 8 style guide
 
----
+## Support
 
-That's the complete project! All files are now visible in this single document. You can copy each section into its respective file.
+For issues or questions:
+- Check [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed docs
+- Open an issue on GitHub
+- Review logs in `logs/rag_pipeline.log`
