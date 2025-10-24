@@ -1,95 +1,161 @@
 """
-Configuration file for RAG pipeline.
-Modify these settings for experimentation.
+Configuration file for RAG pipeline experiments.
+Modify these settings to experiment with different configurations.
 """
 from pathlib import Path
+from typing import Dict, Any
 
 # ============================================================================
-# PATH CONFIGURATION
+# PROJECT PATHS
 # ============================================================================
 PROJECT_ROOT = Path(__file__).parent
-DATA_DIR = PROJECT_ROOT.parent / "data"
+DATA_DIR = PROJECT_ROOT / "data"
 INPUT_DIR = DATA_DIR / "kyndryl-docs-test"
 CHUNKS_DIR = DATA_DIR / "chunks"
-CHUNKS_FILE = CHUNKS_DIR / "kyndryl_chunks.json"
+LOGS_DIR = PROJECT_ROOT / "logs"
+
+# Ensure directories exist
+CHUNKS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "detailed": {
+            "format": "%(asctime)s [%(levelname)s] %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+            "formatter": "default",
+            "stream": "ext://sys.stdout"
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "DEBUG",
+            "formatter": "detailed",
+            "filename": str(LOGS_DIR / "rag_pipeline.log"),
+            "maxBytes": 10485760,  # 10MB
+            "backupCount": 5
+        }
+    },
+    "root": {
+        "level": "DEBUG",
+        "handlers": ["console", "file"]
+    }
+}
 
 # ============================================================================
 # CHUNKING CONFIGURATION
 # ============================================================================
-CHUNKING = {
-    "image_coverage_threshold": 0.15,  # 15% image coverage triggers vision processing
-    "vision_model": "gpt-4o"
+CHUNKING_CONFIG = {
+    "pdf": {
+        "chunker_class": "MultimodalPDFChunker",
+        "image_coverage_threshold": 0.15,  # 15% triggers vision processing
+        "vision_model": "gpt-4o",
+        "log_level": "INFO"
+    },
+    # Add more document types here as needed
+    # "docx": {
+    #     "chunker_class": "DocxChunker",
+    #     ...
+    # },
 }
 
 # ============================================================================
 # EMBEDDING CONFIGURATION
 # ============================================================================
-EMBEDDING = {
-    # Options: "openai" or "sentence_transformers"
-    "provider": "openai",
-    
-    # OpenAI models: "text-embedding-3-small", "text-embedding-3-large"
-    # Sentence Transformers: "sentence-transformers/all-MiniLM-L6-v2", etc.
-    "model": "text-embedding-3-large",
-    
-    "batch_size": 64,
-    "normalize_embeddings": True
-}
-
-# ============================================================================
-# VECTOR DB CONFIGURATION (MILVUS)
-# ============================================================================
-MILVUS = {
-    "host": "localhost",
-    "port": "19530",
-    "alias": "default",
-    
-    # Collection settings
-    "collection_name": "kyndryl_document_embeddings",
-    
-    # Index settings
-    # Options: "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "ANNOY"
-    "index_type": "IVF_FLAT",
-    
-    # Similarity metric options: "IP" (Inner Product), "L2", "COSINE"
-    "similarity_metric": "IP",
-    
-    # Index hyperparameters (depends on index_type)
-    # For IVF_FLAT: {"nlist": 1024}
-    # For HNSW: {"M": 16, "efConstruction": 200}
-    "index_params": {
-        "nlist": 1024
+EMBEDDING_CONFIG = {
+    "text": {
+        # OpenAI embeddings
+        "openai": {
+            "model": "text-embedding-3-large",  # or "text-embedding-3-small"
+            "batch_size": 64,
+            "normalize": True,
+            "dimensions": 3072  # 3072 for large, 1536 for small
+        },
+        # Sentence Transformers
+        "sentence_transformers": {
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "batch_size": 64,
+            "normalize": True,
+            "dimensions": 384
+        }
     },
-    
-    # Search parameters (depends on index_type)
-    # For IVF_FLAT: {"nprobe": 10}
-    # For HNSW: {"ef": 200}
-    "search_params": None,  # None uses defaults
-    
-    # Whether to drop existing collection on ingestion (True for testing)
-    "drop_existing": True
+    # Future: code embeddings
+    # "code": {
+    #     "openai": {
+    #         "model": "text-embedding-3-large",
+    #         ...
+    #     }
+    # }
+}
+
+# Current embedding provider to use
+ACTIVE_EMBEDDING_PROVIDER = "openai"  # or "sentence_transformers"
+ACTIVE_EMBEDDING_TYPE = "text"
+
+# ============================================================================
+# VECTOR DATABASE CONFIGURATION - MILVUS
+# ============================================================================
+MILVUS_CONFIG = {
+    "connection": {
+        "host": "localhost",
+        "port": "19530",
+        "alias": "default"
+    },
+    "collection": {
+        "name": "kyndryl_document_embeddings",
+        "description": "Document embeddings with full chunk metadata"
+    },
+    "index": {
+        "index_type": "IVF_FLAT",  # Options: HNSW, IVF_FLAT, IVF_PQ, etc.
+        "metric_type": "IP",  # Options: IP (inner product), L2, COSINE
+        "params": {
+            "nlist": 1024  # For IVF_FLAT
+            # For HNSW: {"M": 16, "efConstruction": 200}
+        }
+    },
+    "search": {
+        "top_k": 5,
+        "params": {}  # Index-specific search params, e.g., {"nprobe": 10} for IVF
+    }
 }
 
 # ============================================================================
-# SEARCH CONFIGURATION
+# EXPERIMENT TRACKING
 # ============================================================================
-SEARCH = {
-    "top_k": 5,
-    "output_fields": [
-        "source_file", 
-        "chunk_id", 
-        "preview", 
-        "full",
-        "page_number",
-        "chunk_type"
-    ]
+EXPERIMENT_CONFIG = {
+    "name": "kyndryl_pdfs",
+    "description": "Initial RAG pipeline with PDF multimodal chunking",
+    "version": "1.0.0",
+    "tags": ["pdf", "multimodal", "milvus", "openai"]
 }
 
 # ============================================================================
-# LOGGING CONFIGURATION
+# HELPER FUNCTIONS
 # ============================================================================
-LOGGING = {
-    "level": "INFO",  # Options: "DEBUG", "INFO", "WARNING", "ERROR"
-    "format": "%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    "date_format": "%Y-%m-%d %H:%M:%S"
-}
+def get_embedding_config() -> Dict[str, Any]:
+    """Get active embedding configuration."""
+    return EMBEDDING_CONFIG[ACTIVE_EMBEDDING_TYPE][ACTIVE_EMBEDDING_PROVIDER]
+
+def get_chunk_output_path(experiment_name: str = None) -> Path:
+    """Get output path for chunks."""
+    if experiment_name:
+        return CHUNKS_DIR / f"{experiment_name}_chunks.json"
+    return CHUNKS_DIR / f"{EXPERIMENT_CONFIG['name']}_chunks.json"
+
+def get_collection_name() -> str:
+    """Get Milvus collection name."""
+    return MILVUS_CONFIG["collection"]["name"]
