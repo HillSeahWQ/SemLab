@@ -366,22 +366,8 @@ Check OpenAI API key and rate limits:
    - IVF_FLAT: Balanced
    - IVF_PQ: Fastest, uses quantization
 4. **Vision Processing**: Only use for truly image-heavy pages (adjust threshold)
-
-## License
-
-MIT License - see LICENSE file
-
-## Contributing
-
-Contributions welcome! Please:
-1. Follow the modular architecture
-2. Add tests for new features
-3. Update documentation
-4. Follow PEP 8 style guide
-
 ## Support
 
 For issues or questions:
-- Check [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for detailed docs
 - Open an issue on GitHub
-- Review logs in `logs/rag_pipeline.log`
+- Review logs in `logs/`
