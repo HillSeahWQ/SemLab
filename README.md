@@ -1,7 +1,8 @@
 # SemantIQ — A Framework for Multimodal Semantic Retrieval Experiments
 
 ## Overview
-**SemantIQ** is a modular and extensible framework designed to benchmark and optimize **semantic retrieval** of systems like RAG, Recommendation Systems, ... etc
+**SemantIQ** is a modular and extensible framework designed to benchmark and optimize **semantic retrieval** of systems like RAG, Recommendation Systems, ... etc.
+
 It enables rapid experimentation across all stages of the retrieval pipeline — from **document loading and multimodal chunking**, to **embedding generation** and **vector database indexing**.
 
 ## Key Features
@@ -129,7 +130,7 @@ results = query_collection(
 ## Project Structure
 
 ```
-RAGLab/
+SemantIQ/
 ├── config.py                   # Central configuration - edit for experimentation
 ├── chunking/                   # Document processing + chunking
 |   ├── __init__.py            
@@ -161,14 +162,7 @@ RAGLab/
 class NewEmbedder(BaseEmbedder):
     
     def embed(self, texts: List[str]) -> np.ndarray:
-        pass
-    
-    def get_dimension(self) -> int:
-        """Return the embedding dimension."""
-        pass
-    
-    def model_name(self) -> str:
-        """Return the model name."""
+        # Your implementation
         pass
 
 ```
@@ -199,6 +193,7 @@ class MyChunker(BaseChunker):
         pass
     
     def get_metadata_schema(self):
+        # Your implementation
         return {"field1": str, "field2": int}
 ```
 
