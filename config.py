@@ -170,6 +170,33 @@ EXPERIMENT_CONFIG = {
     "version": "1.0.0",
     "tags": ["pdf", "multimodal", "milvus", "openai"]
 }
+# ============================================================================
+# EVALUATION CONFIGURATION
+# ============================================================================
+EVAL_DIR = DATA_DIR / "evaluation"
+GROUND_TRUTH_DIR = EVAL_DIR / "ground_truth"
+QUERY_RESULTS_DIR = EVAL_DIR / "query_results"
+EVAL_RESULTS_DIR = EVAL_DIR / "eval_results"
+
+# Ensure directories exist
+GROUND_TRUTH_DIR.mkdir(parents=True, exist_ok=True)
+QUERY_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+EVAL_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+EVALUATION_CONFIG = {
+    "metrics": [
+        "precision@k",
+        "recall@k", 
+        "f1@k",
+        "hit_rate@k",
+        "mrr",
+        "map",
+        "ndcg@k"
+    ],
+    "k_values": [1, 3, 5, 10],
+    "default_ground_truth": str(GROUND_TRUTH_DIR / "default_queries.json"),
+    "results_naming": "{experiment_name}_{vector_db}_{embedding_provider}_{timestamp}.json"
+}
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -196,3 +223,11 @@ def get_vector_db_config() -> Dict[str, Any]:
         return FAISS_CONFIG
     else:
         raise ValueError(f"Unknown vector database: {ACTIVE_VECTOR_DB}")
+    
+def get_eval_paths() -> Dict[str, Path]:
+    """Get evaluation-related paths."""
+    return {
+        "ground_truth_dir": GROUND_TRUTH_DIR,
+        "query_results_dir": QUERY_RESULTS_DIR,
+        "eval_results_dir": EVAL_RESULTS_DIR
+    }
