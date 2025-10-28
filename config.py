@@ -107,6 +107,11 @@ ACTIVE_EMBEDDING_PROVIDER = "openai"  # or "sentence_transformers"
 ACTIVE_EMBEDDING_TYPE = "text"
 
 # ============================================================================
+# VECTOR DATABASE SELECTION
+# ============================================================================
+ACTIVE_VECTOR_DB = "faiss"  # Options: "milvus", "faiss"
+
+# ============================================================================
 # VECTOR DATABASE CONFIGURATION - MILVUS
 # ============================================================================
 MILVUS_CONFIG = {
@@ -130,6 +135,29 @@ MILVUS_CONFIG = {
     "search": {
         "top_k": 5,
         "params": {}  # Index-specific search params, e.g., {"nprobe": 10} for IVF
+    }
+}
+
+# ============================================================================
+# VECTOR DATABASE CONFIGURATION - FAISS
+# ============================================================================
+FAISS_CONFIG = {
+    "index": {
+        "index_dir": str(DATA_DIR / "faiss_indices"),
+        "name": "kyndryl_document_embeddings", # TODO - EDIT HERE
+        "index_type": "Flat",  # Options: Flat, IVF, HNSW
+        "metric_type": "IP",  # Options: IP (inner product), L2
+        "normalize": True,  # True for cosine similarity with IP metric
+        "params": {
+            # For IVF: {"nlist": 100}
+            # For HNSW: {"M": 32}
+        }
+    },
+    "search": {
+        "top_k": 5,
+        "params": {
+            # For IVF: {"nprobe": 10}
+        }
     }
 }
 
@@ -159,3 +187,12 @@ def get_chunk_output_path(experiment_name: str = None) -> Path:
 def get_collection_name() -> str:
     """Get Milvus collection name."""
     return MILVUS_CONFIG["collection"]["name"]
+
+def get_vector_db_config() -> Dict[str, Any]:
+    """Get active vector database configuration."""
+    if ACTIVE_VECTOR_DB == "milvus":
+        return MILVUS_CONFIG
+    elif ACTIVE_VECTOR_DB == "faiss":
+        return FAISS_CONFIG
+    else:
+        raise ValueError(f"Unknown vector database: {ACTIVE_VECTOR_DB}")

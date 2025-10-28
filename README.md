@@ -46,20 +46,40 @@ To systematically study how **chunking**, **embedding**, and **vector indexing**
 ### 3. Vector Database Support
 
 **Milvus**  
-- Local standalone setup via Docker container  
+- Distributed vector database with production-ready features
+- Supports multiple index types (HNSW, IVF_FLAT, IVF_PQ)
+- Requires Docker setup (see below)
+- Best for: Production deployments, large-scale datasets
 
-*Extensible: Add FAISS, Chroma, or other vector databases with configurable parameters.*
+**FAISS (Facebook AI Similarity Search)**  
+- File-based local vector storage
+- CPU and GPU support available
+- Multiple index types (Flat, IVF, HNSW)
+- Best for: Development, experimentation, small-to-medium datasets
+- No server setup required
+
+*Extensible: Add Chroma, Pinecone, Weaviate, or other vector databases with configurable parameters.*
 
 ---
 
 ## Quick Start
 
+### 0. Prerequisites
+
+Before getting started, ensure you have the following installed:
+
+| Requirement | Version | Notes |
+|--------------|----------|--------|
+| **Python** | ≥ 3.12 | Recommended to use a virtual environment |
+| **uv** | Latest | Fast Python package manager ([uv documentation](https://docs.astral.sh/uv/)) |
+|**Docker** | Latest | Required for running local vector databases or external services |
+
 ### 1. Installation
 
 ```bash
 # Clone repository
-git clone <your-repo>
-cd rag-pipeline
+git clone <repo>
+cd SemantIQ
 
 # Install dependencies
 uv sync
@@ -70,58 +90,62 @@ OPENAI_API_KEY=your_openai_key_here
 EOF
 ```
 
-### 2. Start Milvus
+### 2. Start Milvus (If Vector DB choice = Milvus)
 
 ```bash
 # Using Docker Compose (recommended)
 # Download docker-compose.yml from Milvus documentation
-docker-compose up -d
+docker-compose -f docker-compose-milvus-standalone.yml up -d
 
 # Verify Milvus is running
 curl http://localhost:19530/healthz
 ```
 
-### 3. Configure Pipeline
+### 3. Configure Pipeline - See more under Configuration Guide
 
 Edit `config.py`:
 
 ```python
-# Set your input directory
+# Set your input directory to documents folder
 INPUT_DIR = DATA_DIR / "your-documents"
 
-# Choose embedding model
+# Choose embedding model - provider to use
 ACTIVE_EMBEDDING_PROVIDER = "openai"  # or "sentence_transformers"
 
-# Configure chunking
-CHUNKING_CONFIG = {
-    "pdf": {
-        "image_coverage_threshold": 0.15,  # Adjust for your needs
-        "vision_model": "gpt-4o",
-    }
-}
+# Choose desired supported vector database
+ACTIVE_VECTOR_DB = "faiss"  # Options: "milvus", "faiss"
 ```
 
 ### 4. Run Ingestion Pipeline
 
 ```bash
 # Full pipeline: Chunk → Embed → Ingest (split up in case you want to test different vector DB/embedding model with existing chunks after run_chunking.py)
+
+# Step 1: Chunk documents (run once)
 uv run scripts/run_chunking.py
-uv run scripts/run_ingestion_milvus.py 
+
+# Step 2: Embed and ingest to your chosen vector database
+
+# For FAISS:
+uv run scripts/ingest_to_faiss.py
+
+# For Milvus:
+uv run scripts/ingest_to_milvus.py
 ```
 
 ### 5. Query Your Data
 
 ```bash
-# Run example queries
-uv run scripts/run_query_milvus.py 
+# Run example queries - (automatically uses ACTIVE_VECTOR_DB)
+uv run scripts/query_vector_db.py
 ```
 
 Or programmatically:
 
 ```python
-from scripts.query_milvus import query_collection
+from scripts.query_vector_db import query_vector_db
 
-results = query_collection(
+results = query_vector_db(
     queries=["What is covered by insurance?"],
     top_k=5
 )
@@ -131,25 +155,140 @@ results = query_collection(
 
 ```
 SemantIQ/
-├── config.py                   # Central configuration - edit for experimentation
-├── chunking/                   # Document processing + chunking
-|   ├── __init__.py            
-│   ├── base.py                 # Base classes
-│   └── pdf_chunker.py          # PDF implementation
-├── embedding/                  # Vector embeddings
-|   ├── __init__.py
+├── config.py                          # Central configuration - edit for experimentation
+├── docker-compose-milvus-standalone.yml  # Milvus Docker setup
+├── chunking/                          # Document processing + chunking
+│   ├── __init__.py            
+│   ├── base.py                        # Base classes
+│   └── pdf_chunker.py                 # PDF implementation
+├── embedding/                         # Vector embeddings
+│   ├── __init__.py
 │   └── embedding_manager.py
-├── vector_db/                   # Database clients
-|   ├── __init__.py
-│   └── milvus_client.py         # [Milvus] connection + disconnect + ingest + query/search 
-├── utils/                       # Utilities
-|   ├── __init__.py
-|   ├── logger.py                  
+├── vector_db/                         # Database clients
+│   ├── __init__.py
+│   ├── milvus_client.py               # Milvus implementation
+│   └── faiss_client.py                # FAISS implementation
+├── utils/                             # Utilities
+│   ├── __init__.py
+│   ├── logger.py                  
 │   └── storage.py
-└── scripts/                     # Executable scripts
-    ├── run_chunking.py          # Entry 1 - Chunking Interface
-    ├── run_ingestion_milvus.py  # Entry 2 - Embedding + VectorDB ingestion Interface
-    └── run_query_milvus.py      # Entry 3 - Querying Interface
+├── scripts/                           # Executable scripts
+│   ├── run_chunking.py                # Entry 1 - Chunking Interface
+│   ├── ingest_to_milvus.py            # Entry 2a - Milvus ingestion
+│   ├── ingest_to_faiss.py             # Entry 2b - FAISS ingestion
+│   └── query_vector_db.py             # Entry 3 - Unified querying (Detects choosen active vectordb)
+└── data/
+    ├── your-documents-to-ingest-folder/ 
+    ├── chunks/                        # Stored document chunks
+    └── faiss_indices/                 # FAISS index files
+```
+## Configuration Guide
+
+### Chunking Parameters
+
+```python
+CHUNKING_CONFIG = {
+    "pdf": {
+        "image_coverage_threshold": 0.15,  # Trigger vision at 15% image coverage
+        "vision_model": "gpt-4o",         # Vision model for image-heavy pages
+        "log_level": "INFO"
+    }
+}
+```
+
+### Embedding Options
+
+```python
+# OpenAI embeddings
+EMBEDDING_CONFIG = {
+    "text": {
+        # OpenAI embeddings
+        "openai": {
+            "model": "text-embedding-3-large",  # or "text-embedding-3-small"
+            "batch_size": 64,
+            "normalize": True,
+            "dimensions": 3072  # 3072 for large, 1536 for small
+        },
+        # Sentence Transformers
+        "sentence_transformers": {
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "batch_size": 64,
+            "normalize": True,
+            "dimensions": 384
+        }
+    },
+    # Future: code embeddings
+    # "code": {
+    #     "openai": {
+    #         "model": "text-embedding-3-large",
+    #         ...
+    #     }
+    # }
+}
+```
+
+### Vector Database Selection
+
+```python
+# Choose your vector database
+ACTIVE_VECTOR_DB = "faiss"  # Options: "faiss", "milvus"
+```
+
+### FAISS Configuration
+
+```python
+FAISS_CONFIG = {
+    "index": {
+        "index_dir": "data/faiss_indices",
+        "name": "document_embeddings",
+        "index_type": "Flat",      # Options: Flat, IVF, HNSW
+        "metric_type": "IP",       # Options: IP (inner product), L2
+        "normalize": True,         # True for cosine similarity with IP
+        "use_gpu": False,          # Set True if using faiss-gpu
+        "gpu_id": 0,              # GPU device ID
+        "params": {
+            # For IVF: {"nlist": 100}
+            # For HNSW: {"M": 32}
+        }
+    },
+    "search": {
+        "top_k": 5,
+        "params": {
+            # For IVF: {"nprobe": 10}
+        }
+    }
+}
+```
+
+**Index Type Selection:**
+
+- **Flat**: Exact search, best accuracy, slower for large datasets
+- **IVF**: Fast approximate search with clustering
+- **HNSW**: Best speed/accuracy tradeoff for production
+
+### Milvus Configuration
+
+```python
+MILVUS_CONFIG = {
+    "connection": {
+        "host": "localhost",
+        "port": "19530",
+        "alias": "default"
+    },
+    "collection": {
+        "name": "document_embeddings",
+        "description": "Document embeddings with metadata"
+    },
+    "index": {
+        "index_type": "IVF_FLAT",  # Options: HNSW, IVF_FLAT, IVF_PQ
+        "metric_type": "IP",        # Options: IP, L2, COSINE
+        "params": {"nlist": 1024}  # Index-specific parameters
+    },
+    "search": {
+        "top_k": 5,
+        "params": {}  # e.g., {"nprobe": 10} for IVF
+    }
+}
 ```
 
 ## Use Cases
@@ -176,8 +315,8 @@ uv run scripts/run_chunking.py
 # 2. Change the embedding model in config.py
 # ACTIVE_EMBEDDING_PROVIDER = "new-embedding-model"
 
-# 3. Embed and ingest without re-chunking
-uv run scripts/run_ingestion_milvus.py 
+# 3. Embed and ingest without re-chunking - e.g. with milvus
+uv run scripts/ingest_to_milvus.py 
 ```
 
 ### 2. Process New Document Types
@@ -214,59 +353,44 @@ class PineconeClient:
 2. Update imports in scripts
 3. No changes needed to chunking/embedding!
 
-## Configuration Guide
-
-### Chunking Parameters
-
-```python
-CHUNKING_CONFIG = {
-    "pdf": {
-        "image_coverage_threshold": 0.15,  # Trigger vision at 15% image coverage
-        "vision_model": "gpt-4o",         # Vision model for image-heavy pages
-        "log_level": "INFO"
-    }
-}
-```
-
-### Embedding Options
-
-```python
-# OpenAI embeddings
-EMBEDDING_CONFIG = {
-    "text": {
-        "openai": {
-            "model": "text-embedding-3-large",  # 3072 dim
-            "batch_size": 64,
-            "normalize": True
-        }
-    }
-}
-
-# Sentence Transformers
-EMBEDDING_CONFIG = {
-    "text": {
-        "sentence_transformers": {
-            "model": "sentence-transformers/all-MiniLM-L6-v2",
-            "batch_size": 64,
-            "normalize": True
-        }
-    }
-}
-```
-
-### Vector Index Configuration
-
-```python
-MILVUS_CONFIG = {
-    "index": {
-        "type": "IVF_FLAT",        # Options: HNSW, IVF_FLAT, IVF_PQ
-        "metric_type": "IP",        # Options: IP, L2, COSINE
-        "params": {"nlist": 1024}  # Index-specific parameters
-    }
-}
-```
-
 ## Extending the Pipeline
+
+### Adding a New Vector Database
+
+1. Create a new client in `vector_db/`:
+
+```python
+class PineconeClient:
+    def __init__(self, ...):
+        pass
+    
+    def create_index(self, ...):
+        pass
+    
+    def ingest_data(self, embeddings, contents, metadatas):
+        pass
+    
+    def search(self, query_embeddings, top_k):
+        pass
+    
+    def get_index_stats(self):
+        pass
+```
+
+2. Add configuration to `config.py`:
+
+```python
+PINECONE_CONFIG = {
+    "api_key": "...",
+    "index_name": "...",
+    ...
+}
+```
+
+3. Create ingestion and query scripts in `scripts/`
+
+4. Update `ACTIVE_VECTOR_DB` options
+
 
 ### Adding Hybrid Search
 
