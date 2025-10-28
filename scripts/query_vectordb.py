@@ -1,9 +1,13 @@
 """
 Unified script for querying vector databases (Milvus or FAISS).
 Automatically uses the active vector database from config.
+Supports saving results for evaluation.
 """
 import sys
+import json
+import argparse
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 from typing import List, Optional
 
@@ -16,7 +20,9 @@ from config import (
     MILVUS_CONFIG,
     FAISS_CONFIG,
     ACTIVE_EMBEDDING_PROVIDER,
-    ACTIVE_EMBEDDING_TYPE
+    ACTIVE_EMBEDDING_TYPE,
+    EXPERIMENT_CONFIG,
+    QUERY_RESULTS_DIR
 )
 from embedding.embedding_manager import EmbeddingManager
 from vector_db.milvus_client import MilvusClient
@@ -30,7 +36,8 @@ def query_vector_db(
     queries: List[str],
     top_k: int = None,
     output_fields: List[str] = None,
-    vector_db: str = None
+    vector_db: str = None,
+    query_ids: Optional[List[str]] = None
 ):
     """
     Query the active vector database (Milvus or FAISS).
@@ -40,6 +47,10 @@ def query_vector_db(
         top_k: Number of results to return (uses config default if None)
         output_fields: Fields to return in results
         vector_db: Override active vector DB ("milvus" or "faiss")
+        query_ids: Optional list of query IDs for result tracking
+        
+    Returns:
+        Dictionary with results and metadata
     """
     # Use active vector DB from config if not specified
     if vector_db is None:
@@ -86,19 +97,47 @@ def query_vector_db(
             top_k=top_k,
             output_fields=output_fields
         )
+        collection_name = MILVUS_CONFIG["collection"]["name"]
     elif vector_db == "faiss":
         results = _query_faiss(
             query_embeddings=query_embeddings,
             top_k=top_k,
             output_fields=output_fields
         )
+        collection_name = FAISS_CONFIG["index"]["name"]
     else:
         raise ValueError(f"Unknown vector database: {vector_db}")
     
     # Display results
     _display_results(queries, results)
     
-    return results
+    # Build structured output
+    if query_ids is None:
+        query_ids = [f"q{i+1}" for i in range(len(queries))]
+    
+    structured_results = {
+        "metadata": {
+            "timestamp": datetime.now().isoformat(),
+            "vector_db": vector_db,
+            "embedding_provider": ACTIVE_EMBEDDING_PROVIDER,
+            "embedding_type": ACTIVE_EMBEDDING_TYPE,
+            "embedding_model": embedder.model_name,
+            "collection_name": collection_name,
+            "top_k": top_k,
+            "num_queries": len(queries),
+            "experiment_name": EXPERIMENT_CONFIG.get("name", "unknown")
+        },
+        "queries": []
+    }
+    
+    for query_id, query_text, query_results in zip(query_ids, queries, results):
+        structured_results["queries"].append({
+            "query_id": query_id,
+            "query_text": query_text,
+            "results": query_results
+        })
+    
+    return structured_results
 
 
 def _query_milvus(query_embeddings, top_k, output_fields):
@@ -202,24 +241,81 @@ def _display_results(queries, results):
     logger.info("="*80)
 
 
+def save_results(results: dict, output_path: Path) -> None:
+    """
+    Save query results to JSON file.
+    
+    Args:
+        results: Results dictionary from query_vector_db
+        output_path: Path to save results
+    """
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Saving results to: {output_path}")
+    
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    
+    logger.info("Results saved successfully")
+
+
 def main():
-    """Run example queries."""
+    """Run example queries with optional result saving."""
+    parser = argparse.ArgumentParser(description="Query vector database")
+    parser.add_argument(
+        "--save-results",
+        type=str,
+        help="Path to save query results (for evaluation)"
+    )
+    parser.add_argument(
+        "--queries-file",
+        type=str,
+        help="Path to JSON file with queries and query IDs"
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Number of results to return"
+    )
     
-    # Example queries - modify these for your use case
-    queries = [
-        "How much does Kyndryl cover for surgeries",
-        "What are the hospitals covered?"
-    ]
+    args = parser.parse_args()
     
-    logger.info(f"Running {len(queries)} example queries...")
+    # Load queries from file or use defaults
+    if args.queries_file:
+        with open(args.queries_file, 'r', encoding='utf-8') as f:
+            queries_data = json.load(f)
+        queries = [q["query_text"] for q in queries_data["queries"]]
+        query_ids = [q["query_id"] for q in queries_data["queries"]]
+    else:
+        # Example queries - modify these for your use case
+        queries = [
+            "How much does Kyndryl cover for surgeries",
+            "What are the hospitals covered?"
+        ]
+        query_ids = None
+    
+    logger.info(f"Running {len(queries)} queries...")
     logger.info(f"Active vector database: {ACTIVE_VECTOR_DB}")
     
     results = query_vector_db(
         queries=queries,
-        top_k=5  # Can be customized
+        top_k=args.top_k,
+        query_ids=query_ids
     )
     
-    logger.info(f"\n[SUCCESS] - Query complete: retrieved {len(results)} result sets")
+    # Save results if requested
+    if args.save_results:
+        output_path = Path(args.save_results)
+        save_results(results, output_path)
+    else:
+        # Auto-save to default location with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"query_results_{ACTIVE_VECTOR_DB}_{timestamp}.json"
+        default_path = QUERY_RESULTS_DIR / default_filename
+        logger.info(f"\nTo save results for evaluation, run with: --save-results {default_path}")
+    
+    logger.info(f"\n[SUCCESS] - Query complete: retrieved {len(results['queries'])} result sets")
 
 
 if __name__ == "__main__":
