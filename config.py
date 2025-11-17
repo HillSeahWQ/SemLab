@@ -61,7 +61,6 @@ LOGGING_CONFIG = {
 # ============================================================================
 CHUNKING_CONFIG = {
     "pdf": {
-        "chunker_class": "MultimodalPDFChunker",
         "image_coverage_threshold": 0.15,  # 15% triggers vision processing
         "vision_model": "gpt-4o",
         "log_level": "INFO"
@@ -160,7 +159,13 @@ FAISS_CONFIG = {
         }
     }
 }
-
+# ============================================================================
+# EXPERIMENT TRACKING
+# ============================================================================
+QUERIES = [ # Modify
+    "How much does Kyndryl cover for surgeries?",
+    "What hospitals are covered?"
+]
 # ============================================================================
 # EXPERIMENT TRACKING
 # ============================================================================
@@ -231,3 +236,50 @@ def get_eval_paths() -> Dict[str, Path]:
         "query_results_dir": QUERY_RESULTS_DIR,
         "eval_results_dir": EVAL_RESULTS_DIR
     }
+    
+    
+def resolve_chunks_path(chunks_arg: str = None) -> Path:
+    """
+    Intelligently resolve chunks file path.
+    
+    Supports:
+    - None: Use default from config
+    - "output.json": Assumes data/chunks/output.json
+    - "chunks/output.json": Resolves to data/chunks/output.json
+    - "data/chunks/output.json": Uses as-is
+    - "/absolute/path/output.json": Uses as-is
+    
+    Args:
+        chunks_arg: Chunks file path argument from command line
+        
+    Returns:
+        Resolved Path object
+    """
+    if chunks_arg is None:
+        return get_chunk_output_path()
+    
+    chunks_path = Path(chunks_arg)
+    
+    # If absolute path, use as-is
+    if chunks_path.is_absolute():
+        return chunks_path
+    
+    # If file exists at given path, use it
+    if chunks_path.exists():
+        return chunks_path
+    
+    # Smart resolution:
+    # 1. If just filename (no directory parts), assume it's in data/chunks/
+    if len(chunks_path.parts) == 1:
+        return CHUNKS_DIR / chunks_path
+    
+    # 2. If starts with "chunks/", prepend with DATA_DIR
+    if chunks_path.parts[0] == "chunks":
+        return DATA_DIR / chunks_path
+    
+    # 3. If starts with "data/", use from project root
+    if chunks_path.parts[0] == "data":
+        return PROJECT_ROOT / chunks_path
+    
+    # 4. Otherwise, assume relative to DATA_DIR
+    return DATA_DIR / chunks_path

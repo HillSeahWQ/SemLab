@@ -2,12 +2,12 @@
 FAISS ingestion script - loads chunks, generates embeddings, and ingests to FAISS.
 Run this script after chunking to ingest documents into the FAISS vector database.
 """
-import logging
 import sys
+import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Add parent directory to path for imports
+# Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config import (
@@ -16,7 +16,8 @@ from config import (
     FAISS_CONFIG,
     ACTIVE_EMBEDDING_PROVIDER,
     ACTIVE_EMBEDDING_TYPE,
-    EXPERIMENT_CONFIG
+    EXPERIMENT_CONFIG,
+    DATA_DIR
 )
 from embedding.embedding_manager import EmbeddingManager
 from vector_db.faiss_client import FAISSClient
@@ -26,136 +27,189 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def main(
-    chunk_file: Path = None,
-    index_name: str = None,
-    drop_existing: bool = True
-):
-    """
-    Run FAISS ingestion pipeline.
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Ingest chunks to FAISS vector database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Fast run - minimal arguments
+  python ingest_to_faiss.py --chunks data/chunks/output.json --index my_index
+  
+  # Advanced run - with hyperparameters
+  python ingest_to_faiss.py \\
+    --chunks data/chunks/output.json \\
+    --index my_index \\
+    --embedding-model text-embedding-3-small \\
+    --index-type HNSW \\
+    --normalize
+        """
+    )
     
-    Args:
-        chunk_file: Path to chunks JSON file (uses config default if None)
-        index_name: Name of FAISS index (uses config default if None)
-        drop_existing: If True, drop existing index before creating new one
-    """
+    # === FAST RUN ARGUMENTS ===
+    parser.add_argument(
+        "--chunks",
+        type=str,
+        help="Path to chunks JSON file (default: data/chunks/<experiment>_chunks.json)"
+    )
+    parser.add_argument(
+        "--index",
+        type=str,
+        help=f"FAISS index name (default: from config, currently '{FAISS_CONFIG['index']['name']}')"
+    )
+    parser.add_argument(
+        "--drop-existing",
+        action="store_true",
+        help="Drop existing index before creating new one"
+    )
+    
+    # === ADVANCED RUN ARGUMENTS ===
+    parser.add_argument(
+        "--embedding-provider",
+        type=str,
+        choices=["openai", "sentence_transformers"],
+        help=f"Embedding provider (default: from config, currently '{ACTIVE_EMBEDDING_PROVIDER}')"
+    )
+    parser.add_argument(
+        "--embedding-model",
+        type=str,
+        help="Embedding model name (default: from config)"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Embedding batch size (default: from config)"
+    )
+    parser.add_argument(
+        "--index-type",
+        type=str,
+        choices=["Flat", "IVF", "HNSW"],
+        help=f"FAISS index type (default: from config, currently '{FAISS_CONFIG['index']['index_type']}')"
+    )
+    parser.add_argument(
+        "--metric-type",
+        type=str,
+        choices=["IP", "L2"],
+        help=f"Distance metric (default: from config, currently '{FAISS_CONFIG['index']['metric_type']}')"
+    )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize embeddings for cosine similarity (default: from config)"
+    )
+    
+    return parser.parse_args()
+
+
+def main():
+    """Run FAISS ingestion pipeline."""
+    args = parse_args()
+    
+    # Load environment variables
+    load_dotenv()
+    
+    # === RESOLVE PATHS ===
+    if args.chunks:
+        chunks_file = Path(args.chunks)
+        if not chunks_file.is_absolute():
+            chunks_file = DATA_DIR / args.chunks
+    else:
+        chunks_file = get_chunk_output_path()
+    
+    index_name = args.index if args.index else FAISS_CONFIG["index"]["name"]
+    
+    # === BUILD CONFIGS ===
+    # Embedding config
+    embedding_provider = args.embedding_provider or ACTIVE_EMBEDDING_PROVIDER
+    embed_config = get_embedding_config().copy()
+    
+    if args.embedding_model:
+        embed_config["model"] = args.embedding_model
+    if args.batch_size:
+        embed_config["batch_size"] = args.batch_size
+    
+    # FAISS config
+    faiss_config = FAISS_CONFIG["index"].copy()
+    
+    if args.index_type:
+        faiss_config["index_type"] = args.index_type
+    if args.metric_type:
+        faiss_config["metric_type"] = args.metric_type
+    if args.normalize:
+        faiss_config["normalize"] = True
+    
+    # === LOG CONFIGURATION ===
     logger.info("="*80)
     logger.info("FAISS INGESTION PIPELINE")
     logger.info("="*80)
     logger.info(f"Experiment: {EXPERIMENT_CONFIG['name']}")
-    logger.info(f"Description: {EXPERIMENT_CONFIG['description']}")
-    logger.info(f"Version: {EXPERIMENT_CONFIG['version']}")
+    logger.info("")
+    logger.info("Configuration:")
+    logger.info(f"  Chunks file: {chunks_file}")
+    logger.info(f"  Index name: {index_name}")
+    logger.info(f"  Embedding provider: {embedding_provider}")
+    logger.info(f"  Embedding model: {embed_config.get('model')}")
+    logger.info(f"  Index type: {faiss_config['index_type']}")
+    logger.info(f"  Metric type: {faiss_config['metric_type']}")
+    logger.info(f"  Normalize: {faiss_config.get('normalize', False)}")
     logger.info("")
     
-    # Use defaults from config if not provided
-    if chunk_file is None:
-        chunk_file = get_chunk_output_path()
-    if index_name is None:
-        index_name = FAISS_CONFIG["index"]["name"]
+    # === VALIDATION ===
+    if not chunks_file.exists():
+        logger.error(f"Chunks file not found: {chunks_file}")
+        logger.info("Run chunking first: python scripts/run_chunking.py")
+        return 1
     
     try:
-        # ================================================================
-        # STEP 1: LOAD CHUNKS
-        # ================================================================
-        logger.info("STEP 1: LOADING CHUNKS FROM JSON")
+        # === LOAD CHUNKS ===
+        logger.info("STEP 1: LOADING CHUNKS")
         logger.info("-"*80)
-        logger.info(f"Loading from: {chunk_file}")
-        
-        if not chunk_file.exists():
-            raise FileNotFoundError(
-                f"Chunk file not found: {chunk_file}\n"
-                f"Please run chunking first: python scripts/run_chunking.py"
-            )
-        
-        contents, metadatas = load_chunks(chunk_file)
-        
+        contents, metadatas = load_chunks(chunks_file)
         logger.info(f"Loaded {len(contents)} chunks")
-        logger.info("")
         print_chunk_statistics(metadatas)
         
-        # ================================================================
-        # STEP 2: GENERATE EMBEDDINGS
-        # ================================================================
+        # === GENERATE EMBEDDINGS ===
         logger.info("")
         logger.info("STEP 2: GENERATING EMBEDDINGS")
         logger.info("-"*80)
         
-        # Load environment variables for API keys
-        load_dotenv()
-        
-        # Get embedding configuration
-        embed_config = get_embedding_config()
-        
-        logger.info(f"Embedding provider: {ACTIVE_EMBEDDING_PROVIDER}")
-        logger.info(f"Embedding type: {ACTIVE_EMBEDDING_TYPE}")
-        
-        # Create embedder
         embedder = EmbeddingManager.create_embedder(
-            provider=ACTIVE_EMBEDDING_PROVIDER,
+            provider=embedding_provider,
             embedding_type=ACTIVE_EMBEDDING_TYPE,
             config=embed_config
         )
         
         logger.info(f"Model: {embedder.model_name}")
-        logger.info(f"Embedding dimension: {embedder.get_dimension()}")
-        logger.info(f"Batch size: {embed_config.get('batch_size', 'default')}")
+        logger.info(f"Dimension: {embedder.get_dimension()}")
         
-        # Generate embeddings
         embeddings = embedder.embed(contents)
+        logger.info(f"Generated embeddings: {embeddings.shape}")
         
-        logger.info(f"Embeddings generated successfully")
-        logger.info(f"   Shape: {embeddings.shape}")
-        logger.info(f"   Dtype: {embeddings.dtype}")
-        
-        # ================================================================
-        # STEP 3: INITIALIZE FAISS CLIENT
-        # ================================================================
+        # === INITIALIZE FAISS ===
         logger.info("")
-        logger.info("STEP 3: INITIALIZING FAISS CLIENT")
+        logger.info("STEP 3: INITIALIZING FAISS")
         logger.info("-"*80)
         
-        index_dir = FAISS_CONFIG["index"]["index_dir"]
-        
-        logger.info(f"Index directory: {index_dir}")
-        logger.info(f"Index name: {index_name}")
-        
         client = FAISSClient(
-            index_dir=index_dir,
+            index_dir=faiss_config["index_dir"],
             index_name=index_name
         )
         
-        # ================================================================
-        # STEP 4: CREATE INDEX
-        # ================================================================
+        # === CREATE INDEX ===
         logger.info("")
-        logger.info("STEP 4: CREATING FAISS INDEX")
+        logger.info("STEP 4: CREATING INDEX")
         logger.info("-"*80)
-        logger.info(f"Drop existing: {drop_existing}")
-        
-        index_config = FAISS_CONFIG["index"]
-        
-        logger.info(f"Index type: {index_config['index_type']}")
-        logger.info(f"Metric type: {index_config['metric_type']}")
-        logger.info(f"Index params: {index_config.get('params', {})}")
-        
-        # Determine if normalization is needed (for cosine similarity)
-        normalize = index_config.get("normalize", False)
-        if normalize:
-            logger.info("Normalization enabled for cosine similarity")
         
         client.create_index(
             embedding_dim=embedder.get_dimension(),
-            index_type=index_config["index_type"],
-            metric_type=index_config["metric_type"],
-            index_params=index_config.get("params", {}),
-            drop_existing=drop_existing
+            index_type=faiss_config["index_type"],
+            metric_type=faiss_config["metric_type"],
+            index_params=faiss_config.get("params", {}),
+            drop_existing=args.drop_existing
         )
         
-        logger.info(f"Index ready: {index_name}")
-        
-        # ================================================================
-        # STEP 5: INGEST DATA
-        # ================================================================
+        # === INGEST DATA ===
         logger.info("")
         logger.info("STEP 5: INGESTING DATA")
         logger.info("-"*80)
@@ -164,64 +218,35 @@ def main(
             embeddings=embeddings,
             contents=contents,
             metadatas=metadatas,
-            normalize=normalize
+            normalize=faiss_config.get("normalize", False)
         )
         
-        # ================================================================
-        # STEP 6: VERIFY INGESTION
-        # ================================================================
+        # === VERIFY ===
         logger.info("")
         logger.info("STEP 6: VERIFYING INGESTION")
         logger.info("-"*80)
         
         stats = client.get_index_stats()
-        
-        logger.info(f"Index statistics:")
-        logger.info(f"   • Name: {stats['name']}")
-        logger.info(f"   • Total vectors: {stats['num_vectors']:,}")
-        logger.info(f"   • Dimension: {stats['dimension']}")
-        logger.info(f"   • Index type: {stats['index_type']}")
-        logger.info(f"   • Metadata entries: {stats['num_metadata']:,}")
-        logger.info(f"   • Index path: {stats['index_path']}")
-        
-        # ================================================================
-        # FINAL SUMMARY
-        # ================================================================
-        logger.info("")
-        logger.info("="*80)
-        logger.info("[SUCCESS] - INGESTION PIPELINE COMPLETE")
-        logger.info("="*80)
-        logger.info(f"Chunks processed: {len(contents)}")
-        logger.info(f"Embedding model: {embedder.model_name}")
-        logger.info(f"Embedding dimension: {embedder.get_dimension()}")
-        logger.info(f"Index name: {index_name}")
         logger.info(f"Total vectors: {stats['num_vectors']:,}")
+        logger.info(f"Index type: {stats['index_type']}")
+        
+        # === SUCCESS ===
         logger.info("")
-        logger.info("Next steps:")
-        logger.info("  • Query your data: python scripts/query_faiss.py")
-        logger.info("  • View logs: tail -f logs/rag_pipeline.log")
+        logger.info("="*80)
+        logger.info("[SUCCESS] - INGESTION COMPLETE")
+        logger.info("="*80)
+        logger.info(f"Index: {index_name}")
+        logger.info(f"Vectors: {stats['num_vectors']:,}")
+        logger.info("")
         logger.info("="*80)
         
-        return {
-            "index_name": index_name,
-            "num_vectors": stats['num_vectors'],
-            "embedding_model": embedder.model_name,
-            "embedding_dim": embedder.get_dimension()
-        }
+        return 0
         
     except Exception as e:
-        logger.error(f"[ERROR] - Ingestion pipeline failed: {e}")
+        logger.error(f"[ERROR] - Ingestion failed: {e}")
         logger.exception("Full error traceback:")
-        raise
+        return 1
 
 
 if __name__ == "__main__":
-    # Run with defaults from config
-    main()
-    
-    # Or customize:
-    # main(
-    #     chunk_file=Path("data/chunks/my_chunks.json"),
-    #     index_name="my_custom_index",
-    #     drop_existing=False  # Keep existing data
-    # )
+    sys.exit(main())
