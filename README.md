@@ -147,7 +147,16 @@ curl http://localhost:19530/healthz
 
 ---
 
-### 5.3 Configure Pipeline 
+### 5.3 Configure Data Directory
+
+Place your documents folder (`your-documents-folder-name`), containing all data files (PDFs, Markdown, code, docs, etc.), inside a top-level `data` directory in the root of this repository.
+
+Example structure:
+SemantiQ/data/your-documents-folder-name
+
+---
+
+### 5.4 Configure Pipeline 
 
 Edit `config.py`:
 
@@ -164,7 +173,7 @@ ACTIVE_VECTOR_DB = "faiss"  # Options: "milvus", "faiss"
 
 ---
 
-### 5.4 Run Ingestion Pipeline
+### 5.5 Run Ingestion Pipeline
 - See **[CLI commands Guide](docs/CLI.md)** on details for more advanced configurable runs
 
 ```bash
@@ -182,7 +191,7 @@ uv run scripts/ingest_to_milvus.py --chunks chunks/[YOUR-CHUNKS-FILENAME].json -
 
 ---
 
-### 5.5 Query Your Data
+### 5.6 Query Your Data
 
 - Auto detects active vector DB with default ingested locations (default faiss pkl files/milvus db configs) if unspecified
 
@@ -204,7 +213,7 @@ results = query_vector_db(
 
 ---
 
-### 5.6 Detailed Evaluation with Metrics
+### 5.7 Detailed Evaluation with Metrics
 
 See **[Evaluation Guide](docs/EVALUATION.md)** - How to run evaluation of retrieval quality with metrics (@K - Precision, Recall, F1, Hit Rate, nDCG).  
 Ensure queries + ground truth JSON file are created.
