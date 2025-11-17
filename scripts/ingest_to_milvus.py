@@ -2,13 +2,12 @@
 Milvus ingestion script - loads chunks, generates embeddings, and ingests to Milvus.
 Run this script after chunking to ingest documents into the Milvus vector database.
 """
-import logging
-import logging.config
 import sys
+import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Add parent directory to path for imports
+# Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from config import (
@@ -17,8 +16,8 @@ from config import (
     MILVUS_CONFIG,
     ACTIVE_EMBEDDING_PROVIDER,
     ACTIVE_EMBEDDING_TYPE,
-    LOGGING_CONFIG,
-    EXPERIMENT_CONFIG
+    EXPERIMENT_CONFIG,
+    DATA_DIR
 )
 from embedding.embedding_manager import EmbeddingManager
 from vector_db.milvus_client import MilvusClient
@@ -28,119 +27,198 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def main(
-    chunk_file: Path = None,
-    collection_name: str = None,
-    drop_existing: bool = True
-):
-    """
-    Run Milvus ingestion pipeline.
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Ingest chunks to Milvus vector database",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+        Examples:
+        # Fast run - minimal arguments
+        python ingest_to_milvus.py --chunks data/chunks/output.json --collection my_collection
+        
+        # Advanced run - with hyperparameters
+        python ingest_to_milvus.py \\
+            --chunks data/chunks/output.json \\
+            --collection my_collection \\
+            --embedding-model text-embedding-3-small \\
+            --index-type HNSW \\
+            --host localhost --port 19530
+        """
+    )
     
-    Args:
-        chunk_file: Path to chunks JSON file (uses config default if None)
-        collection_name: Name of Milvus collection (uses config default if None)
-        drop_existing: If True, drop existing collection before creating new one
-    """
+    # === FAST RUN ARGUMENTS ===
+    parser.add_argument(
+        "--chunks",
+        type=str,
+        help="Path to chunks JSON file (default: data/chunks/<experiment>_chunks.json)"
+    )
+    parser.add_argument(
+        "--collection",
+        type=str,
+        help=f"Milvus collection name (default: from config, currently '{MILVUS_CONFIG['collection']['name']}')"
+    )
+    parser.add_argument(
+        "--drop-existing",
+        action="store_true",
+        help="Drop existing collection before creating new one"
+    )
+    
+    # === ADVANCED RUN ARGUMENTS - Connection ===
+    parser.add_argument(
+        "--host",
+        type=str,
+        help=f"Milvus host (default: from config, currently '{MILVUS_CONFIG['connection']['host']}')"
+    )
+    parser.add_argument(
+        "--port",
+        type=str,
+        help=f"Milvus port (default: from config, currently '{MILVUS_CONFIG['connection']['port']}')"
+    )
+    
+    # === ADVANCED RUN ARGUMENTS - Embedding ===
+    parser.add_argument(
+        "--embedding-provider",
+        type=str,
+        choices=["openai", "sentence_transformers"],
+        help=f"Embedding provider (default: from config, currently '{ACTIVE_EMBEDDING_PROVIDER}')"
+    )
+    parser.add_argument(
+        "--embedding-model",
+        type=str,
+        help="Embedding model name (default: from config)"
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Embedding batch size (default: from config)"
+    )
+    
+    # === ADVANCED RUN ARGUMENTS - Index ===
+    parser.add_argument(
+        "--index-type",
+        type=str,
+        choices=["IVF_FLAT", "HNSW", "IVF_PQ"],
+        help=f"Milvus index type (default: from config, currently '{MILVUS_CONFIG['index']['index_type']}')"
+    )
+    parser.add_argument(
+        "--metric-type",
+        type=str,
+        choices=["IP", "L2", "COSINE"],
+        help=f"Distance metric (default: from config, currently '{MILVUS_CONFIG['index']['metric_type']}')"
+    )
+    
+    return parser.parse_args()
+
+
+def main():
+    """Run Milvus ingestion pipeline."""
+    args = parse_args()
+    
+    # Load environment variables
+    load_dotenv()
+    
+    # === RESOLVE PATHS ===
+    if args.chunks:
+        chunks_file = Path(args.chunks)
+        if not chunks_file.is_absolute():
+            chunks_file = DATA_DIR / args.chunks
+    else:
+        chunks_file = get_chunk_output_path()
+    
+    collection_name = args.collection if args.collection else MILVUS_CONFIG["collection"]["name"]
+    
+    # === BUILD CONFIGS ===
+    # Connection config
+    milvus_conn = MILVUS_CONFIG["connection"].copy()
+    if args.host:
+        milvus_conn["host"] = args.host
+    if args.port:
+        milvus_conn["port"] = args.port
+    
+    # Embedding config
+    embedding_provider = args.embedding_provider or ACTIVE_EMBEDDING_PROVIDER
+    embed_config = get_embedding_config().copy()
+    
+    if args.embedding_model:
+        embed_config["model"] = args.embedding_model
+    if args.batch_size:
+        embed_config["batch_size"] = args.batch_size
+    
+    # Index config
+    index_config = MILVUS_CONFIG["index"].copy()
+    if args.index_type:
+        index_config["index_type"] = args.index_type
+    if args.metric_type:
+        index_config["metric_type"] = args.metric_type
+    
+    # === LOG CONFIGURATION ===
     logger.info("="*80)
     logger.info("MILVUS INGESTION PIPELINE")
     logger.info("="*80)
     logger.info(f"Experiment: {EXPERIMENT_CONFIG['name']}")
-    logger.info(f"Description: {EXPERIMENT_CONFIG['description']}")
-    logger.info(f"Version: {EXPERIMENT_CONFIG['version']}")
+    logger.info("")
+    logger.info("Configuration:")
+    logger.info(f"  Chunks file: {chunks_file}")
+    logger.info(f"  Collection: {collection_name}")
+    logger.info(f"  Milvus host: {milvus_conn['host']}:{milvus_conn['port']}")
+    logger.info(f"  Embedding provider: {embedding_provider}")
+    logger.info(f"  Embedding model: {embed_config.get('model')}")
+    logger.info(f"  Index type: {index_config['index_type']}")
+    logger.info(f"  Metric type: {index_config['metric_type']}")
     logger.info("")
     
-    # Use defaults from config if not provided
-    if chunk_file is None:
-        chunk_file = get_chunk_output_path()
-    if collection_name is None:
-        collection_name = MILVUS_CONFIG["collection"]["name"]
+    # === VALIDATION ===
+    if not chunks_file.exists():
+        logger.error(f"Chunks file not found: {chunks_file}")
+        logger.info("Run chunking first: python scripts/run_chunking.py")
+        return 1
     
     try:
-        # ================================================================
-        # STEP 1: LOAD CHUNKS
-        # ================================================================
-        logger.info("STEP 1: LOADING CHUNKS FROM JSON")
+        # === LOAD CHUNKS ===
+        logger.info("STEP 1: LOADING CHUNKS")
         logger.info("-"*80)
-        logger.info(f"Loading from: {chunk_file}")
-        
-        if not chunk_file.exists():
-            raise FileNotFoundError(
-                f"Chunk file not found: {chunk_file}\n"
-                f"Please run chunking first: python scripts/run_chunking.py"
-            )
-        
-        contents, metadatas = load_chunks(chunk_file)
-        
+        contents, metadatas = load_chunks(chunks_file)
         logger.info(f"Loaded {len(contents)} chunks")
-        logger.info("")
         print_chunk_statistics(metadatas)
         
-        # ================================================================
-        # STEP 2: GENERATE EMBEDDINGS
-        # ================================================================
+        # === GENERATE EMBEDDINGS ===
         logger.info("")
         logger.info("STEP 2: GENERATING EMBEDDINGS")
         logger.info("-"*80)
         
-        # Load environment variables for API keys
-        load_dotenv()
-        
-        # Get embedding configuration
-        embed_config = get_embedding_config()
-        
-        logger.info(f"Embedding provider: {ACTIVE_EMBEDDING_PROVIDER}")
-        logger.info(f"Embedding type: {ACTIVE_EMBEDDING_TYPE}")
-        
-        # Create embedder
         embedder = EmbeddingManager.create_embedder(
-            provider=ACTIVE_EMBEDDING_PROVIDER,
+            provider=embedding_provider,
             embedding_type=ACTIVE_EMBEDDING_TYPE,
             config=embed_config
         )
         
         logger.info(f"Model: {embedder.model_name}")
-        logger.info(f"Embedding dimension: {embedder.get_dimension()}")
-        logger.info(f"Batch size: {embed_config.get('batch_size', 'default')}")
+        logger.info(f"Dimension: {embedder.get_dimension()}")
         
-        # Generate embeddings
         embeddings = embedder.embed(contents)
+        logger.info(f"Generated embeddings: {embeddings.shape}")
         
-        logger.info(f"Embeddings generated successfully")
-        logger.info(f"   Shape: {embeddings.shape}")
-        logger.info(f"   Dtype: {embeddings.dtype}")
-        
-        # ================================================================
-        # STEP 3: CONNECT TO MILVUS
-        # ================================================================
+        # === CONNECT TO MILVUS ===
         logger.info("")
         logger.info("STEP 3: CONNECTING TO MILVUS")
         logger.info("-"*80)
-        
-        milvus_conn = MILVUS_CONFIG["connection"]
-        
-        logger.info(f"Host: {milvus_conn['host']}")
-        logger.info(f"Port: {milvus_conn['port']}")
         
         client = MilvusClient(
             host=milvus_conn["host"],
             port=milvus_conn["port"],
             alias=milvus_conn["alias"]
         )
-        
         client.connect()
         
-        # ================================================================
-        # STEP 4: CREATE COLLECTION WITH AUTO SCHEMA
-        # ================================================================
+        # === CREATE COLLECTION ===
         logger.info("")
-        logger.info("STEP 4: CREATING/LOADING COLLECTION")
+        logger.info("STEP 4: CREATING COLLECTION")
         logger.info("-"*80)
-        logger.info(f"Collection name: {collection_name}")
-        logger.info(f"Drop existing: {drop_existing}")
         
-        # Infer schema from metadata
+        # Infer schema
+        schema_dict = {}
         if metadatas:
-            schema_dict = {}
             for key, value in metadatas[0].items():
                 if isinstance(value, int):
                     schema_dict[key] = int
@@ -150,32 +228,19 @@ def main(
                     schema_dict[key] = bool
                 else:
                     schema_dict[key] = str
-            
-            logger.info(f"Auto-detected schema fields: {len(schema_dict)}")
-            logger.debug(f"Schema: {schema_dict}")
         
         client.create_collection_from_schema(
             collection_name=collection_name,
             metadata_schema=schema_dict,
             embedding_dim=embedder.get_dimension(),
             description=MILVUS_CONFIG["collection"]["description"],
-            drop_existing=drop_existing
+            drop_existing=args.drop_existing
         )
         
-        logger.info(f"Collection ready: {collection_name}")
-        
-        # ================================================================
-        # STEP 5: INGEST DATA WITH INDEXING
-        # ================================================================
+        # === INGEST DATA ===
         logger.info("")
         logger.info("STEP 5: INGESTING DATA")
         logger.info("-"*80)
-        
-        index_config = MILVUS_CONFIG["index"]
-        
-        logger.info(f"Index type: {index_config['index_type']}")
-        logger.info(f"Metric type: {index_config['metric_type']}")
-        logger.info(f"Index params: {index_config['params']}")
         
         client.ingest_data(
             collection_name=collection_name,
@@ -185,60 +250,33 @@ def main(
             index_config=index_config
         )
         
-        # ================================================================
-        # STEP 6: VERIFY INGESTION
-        # ================================================================
+        # === VERIFY ===
         logger.info("")
         logger.info("STEP 6: VERIFYING INGESTION")
         logger.info("-"*80)
         
         stats = client.get_collection_stats(collection_name)
-        
-        logger.info(f"Collection statistics:")
-        logger.info(f"   • Name: {stats['name']}")
-        logger.info(f"   • Total entities: {stats['num_entities']:,}")
-        logger.info(f"   • Schema fields: {len(stats['schema'])}")
+        logger.info(f"Total entities: {stats['num_entities']:,}")
         
         client.disconnect()
         
-        # ================================================================
-        # FINAL SUMMARY
-        # ================================================================
+        # === SUCCESS ===
         logger.info("")
         logger.info("="*80)
-        logger.info("[SUCCESS] - INGESTION PIPELINE COMPLETE")
+        logger.info("[SUCCESS] - INGESTION COMPLETE")
         logger.info("="*80)
-        logger.info(f"Chunks processed: {len(contents)}")
-        logger.info(f"Embedding model: {embedder.model_name}")
-        logger.info(f"Embedding dimension: {embedder.get_dimension()}")
         logger.info(f"Collection: {collection_name}")
-        logger.info(f"Total entities: {stats['num_entities']:,}")
+        logger.info(f"Entities: {stats['num_entities']:,}")
         logger.info("")
-        logger.info("Next steps:")
-        logger.info("  • Query your data: python scripts/query_milvus.py")
-        logger.info("  • View logs: tail -f logs/rag_pipeline.log")
         logger.info("="*80)
         
-        return {
-            "collection_name": collection_name,
-            "num_entities": stats['num_entities'],
-            "embedding_model": embedder.model_name,
-            "embedding_dim": embedder.get_dimension()
-        }
+        return 0
         
     except Exception as e:
-        logger.error(f"[ERROR] - Ingestion pipeline failed: {e}")
+        logger.error(f"[ERROR] - Ingestion failed: {e}")
         logger.exception("Full error traceback:")
-        raise
+        return 1
 
 
 if __name__ == "__main__":
-    # Run with defaults from config
-    main()
-    
-    # Or customize:
-    # main(
-    #     chunk_file=Path("data/chunks/my_chunks.json"),
-    #     collection_name="my_custom_collection",
-    #     drop_existing=False  # Keep existing data
-    # )
+    sys.exit(main())

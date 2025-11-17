@@ -62,7 +62,7 @@ uv run scripts/compare_experiments.py \
 
 ## Ground Truth Format
 
-Ground truth is stored as JSON with this structure:
+Ground truth is stored as JSON with **graded relevance scores**:
 
 ```json
 {
@@ -70,7 +70,7 @@ Ground truth is stored as JSON with this structure:
     {
       "query_id": "q1",
       "query_text": "What is covered by insurance?",
-      "relevant_doc_ids": ["5", "12", "23", "45"],
+      "relevant_docs": ["5", "12", "23"],
       "metadata": {
         "category": "insurance",
         "difficulty": "easy"
@@ -79,7 +79,7 @@ Ground truth is stored as JSON with this structure:
   ],
   "metadata": {
     "num_queries": 1,
-    "format_version": "1.0"
+    "format_version": "2.0"
   }
 }
 ```
@@ -87,10 +87,15 @@ Ground truth is stored as JSON with this structure:
 **Fields:**
 - `query_id`: Unique identifier for the query
 - `query_text`: The actual query text
-- `relevant_doc_ids`: List of relevant chunk/document IDs (strings)
+- `relevant_docs`: **Dict mapping document IDs to relevance scores**
+  - **Higher scores = more relevant**
+  - Recommended scale: 0-3 (but any positive scale works)
+  - 0 = not relevant, 1 = somewhat relevant, 2 = relevant, 3 = highly relevant
 - `metadata`: Optional metadata (category, difficulty, etc.)
 
 **Important:** Document IDs must match the IDs returned by your vector database (the `id` field in query results).
+
+**Backward Compatibility:** The system still supports old binary format with `relevant_doc_ids` list (automatically converted to score 1.0).
 
 ---
 
@@ -125,9 +130,12 @@ The system computes the following metrics:
 
 **nDCG@K** (Normalized Discounted Cumulative Gain)
 - Rewards relevant documents at higher ranks
+- **Uses graded relevance scores** - more relevant docs contribute more
 - Accounts for position in ranking
+- Formula: DCG@K / IDCG@K where DCG = sum(relevance_score / log2(rank+1))
 - Range: 0.0 to 1.0
 - Higher is better
+- **Best metric for graded relevance**
 
 ### Metrics Independent of K
 
@@ -183,14 +191,25 @@ Example session:
 --- Query 1 ---
 Enter query text: What does insurance cover for surgeries?
 Enter query ID (default: q1): q1
-Enter relevant document/chunk IDs: 15,23,67
+Enter relevant document/chunk IDs with relevance scores:
+Format: doc_id:score,doc_id:score,...
+Example: 5:3.0,12:2.0,23:1.0
+Relevance scale: 0-3 (0=not relevant, 1=somewhat, 2=relevant, 3=highly relevant)
+IDs with scores: 15:3.0,23:2.5,67:2.0
 ✓ Added query 'q1' with 3 relevant documents
+    - 15: 3.0
+    - 23: 2.5
+    - 67: 2.0
 
 --- Query 2 ---
 Enter query text: Which hospitals are in network?
 Enter query ID (default: q2): q2
-Enter relevant document/chunk IDs: 8,42,91,103
+IDs with scores: 8:3.0,42:3.0,91:2.0,103:1.0
 ✓ Added query 'q2' with 4 relevant documents
+    - 8: 3.0
+    - 42: 3.0
+    - 91: 2.0
+    - 103: 1.0
 
 Enter query text: done
 ✓ Ground truth saved
@@ -311,9 +330,22 @@ uv run scripts/query_vector_db.py --queries-file queries.json --save-results res
 
 ### Batch Ground Truth Creation
 
-Create queries file, then:
+Create queries file with graded relevance, then:
 ```bash
 uv run scripts/create_ground_truth.py --from-file queries_with_relevance.json --output gt.json
+```
+
+Example input file format:
+```json
+{
+  "queries": [
+    {
+      "query_id": "q1",
+      "query_text": "What is covered?",
+      "relevant_docs": ["5", "12", "23"]
+    }
+  ]
+}
 ```
 
 ---
@@ -324,9 +356,9 @@ uv run scripts/create_ground_truth.py --from-file queries_with_relevance.json --
 
 1. **Start Small**: Begin with 10-20 high-quality annotations
 2. **Diverse Queries**: Cover different query types and difficulties
-3. **Multiple Relevant Docs**: Include all relevant documents (not just top-1)
-4. **Be Consistent**: Use the same criteria for "relevance" across queries
-5. **Document Criteria**: Note your relevance criteria in metadata
+3. **Be Consistent**: Use the same criteria for relevance scores across queries
+4. **Document Criteria**: Note your relevance criteria in metadata
+5. **Multiple Levels**: Include documents at different relevance levels for better nDCG evaluation
 
 ### Interpreting Results
 
@@ -430,12 +462,12 @@ You can also use the evaluation system programmatically:
 from evaluation import RetrievalEvaluator, GroundTruthManager
 from pathlib import Path
 
-# Create ground truth
+# Create ground truth with graded relevance
 gt_manager = GroundTruthManager()
 gt_manager.add_query(
     query_id="q1",
     query_text="What is covered?",
-    relevant_doc_ids=["5", "12", "23"]
+    relevant_docs={"5": 3.0, "12": 2.0, "23": 1.0}  # Dict with scores
 )
 gt_manager.save(Path("data/evaluation/ground_truth/my_gt.json"))
 

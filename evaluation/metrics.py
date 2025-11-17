@@ -1,9 +1,10 @@
 """
 Evaluation metrics for retrieval system.
 Implements precision@k, recall@k, MRR, MAP, nDCG@k, etc.
+Supports both binary and graded relevance.
 """
 import numpy as np
-from typing import List, Dict, Set, Any
+from typing import List, Dict, Set, Any, Union
 import logging
 
 logger = logging.getLogger(__name__)
@@ -161,7 +162,7 @@ def average_precision(retrieved: List[str], relevant: Set[str]) -> float:
     return precision_sum / len(relevant)
 
 
-def dcg_at_k(retrieved: List[str], relevant: Set[str], k: int) -> float:
+def dcg_at_k(retrieved: List[str], relevant: Union[Set[str], Dict[str, float]], k: int) -> float:
     """
     Calculate Discounted Cumulative Gain at K (DCG@K).
     
@@ -169,9 +170,12 @@ def dcg_at_k(retrieved: List[str], relevant: Set[str], k: int) -> float:
     DCG@K = sum_{i=1}^{K} (rel_i / log2(i + 1))
     where rel_i = 1 if item is relevant, 0 otherwise
     
+    For graded relevance:
+    DCG@K = sum_{i=1}^{K} (relevance_score_i / log2(i + 1))
+    
     Args:
         retrieved: List of retrieved item IDs (in ranked order)
-        relevant: Set of relevant item IDs
+        relevant: Set of relevant IDs (binary) or Dict mapping IDs to relevance scores (graded)
         k: Cutoff rank
         
     Returns:
@@ -183,48 +187,73 @@ def dcg_at_k(retrieved: List[str], relevant: Set[str], k: int) -> float:
     dcg = 0.0
     retrieved_at_k = retrieved[:k]
     
+    # Check if graded relevance (dict) or binary (set)
+    is_graded = isinstance(relevant, dict)
+    
     for rank, item in enumerate(retrieved_at_k, start=1):
-        relevance = 1 if item in relevant else 0
+        if is_graded:
+            relevance = relevant.get(item, 0.0)
+        else:
+            relevance = 1.0 if item in relevant else 0.0
+        
         dcg += relevance / np.log2(rank + 1)
     
     return dcg
 
 
-def idcg_at_k(relevant: Set[str], k: int) -> float:
+def idcg_at_k(relevant: Union[Set[str], Dict[str, float]], k: int) -> float:
     """
     Calculate Ideal Discounted Cumulative Gain at K (IDCG@K).
     
-    IDCG@K = DCG of the ideal ranking (all relevant items at top)
+    IDCG@K = DCG of the ideal ranking (all relevant items at top, sorted by relevance)
     
     Args:
-        relevant: Set of relevant item IDs
+        relevant: Set of relevant IDs (binary) or Dict mapping IDs to relevance scores (graded)
         k: Cutoff rank
         
     Returns:
         IDCG score
     """
-    if len(relevant) == 0:
-        return 0.0
+    is_graded = isinstance(relevant, dict)
     
-    # For binary relevance, ideal ranking has all relevant items at top
-    num_relevant_at_k = min(len(relevant), k)
-    
-    idcg = 0.0
-    for rank in range(1, num_relevant_at_k + 1):
-        idcg += 1.0 / np.log2(rank + 1)
-    
-    return idcg
+    if is_graded:
+        if not relevant:
+            return 0.0
+        
+        # Sort relevance scores in descending order
+        sorted_scores = sorted(relevant.values(), reverse=True)
+        num_relevant_at_k = min(len(sorted_scores), k)
+        
+        idcg = 0.0
+        for rank in range(1, num_relevant_at_k + 1):
+            idcg += sorted_scores[rank - 1] / np.log2(rank + 1)
+        
+        return idcg
+    else:
+        # Binary relevance
+        if len(relevant) == 0:
+            return 0.0
+        
+        num_relevant_at_k = min(len(relevant), k)
+        
+        idcg = 0.0
+        for rank in range(1, num_relevant_at_k + 1):
+            idcg += 1.0 / np.log2(rank + 1)
+        
+        return idcg
 
 
-def ndcg_at_k(retrieved: List[str], relevant: Set[str], k: int) -> float:
+def ndcg_at_k(retrieved: List[str], relevant: Union[Set[str], Dict[str, float]], k: int) -> float:
     """
     Calculate Normalized Discounted Cumulative Gain at K (nDCG@K).
     
     nDCG@K = DCG@K / IDCG@K
     
+    Supports both binary and graded relevance.
+    
     Args:
         retrieved: List of retrieved item IDs (in ranked order)
-        relevant: Set of relevant item IDs
+        relevant: Set of relevant IDs (binary) or Dict mapping IDs to relevance scores (graded)
         k: Cutoff rank
         
     Returns:
@@ -241,15 +270,17 @@ def ndcg_at_k(retrieved: List[str], relevant: Set[str], k: int) -> float:
 
 def calculate_all_metrics(
     retrieved: List[str],
-    relevant: Set[str],
+    relevant: Union[Set[str], Dict[str, float]],
     k_values: List[int]
 ) -> Dict[str, float]:
     """
     Calculate all retrieval metrics for a single query.
     
+    Supports both binary relevance (Set) and graded relevance (Dict).
+    
     Args:
         retrieved: List of retrieved item IDs (in ranked order)
-        relevant: Set of relevant item IDs
+        relevant: Set of relevant IDs (binary) or Dict mapping IDs to relevance scores (graded)
         k_values: List of K values to compute metrics for
         
     Returns:
@@ -257,17 +288,24 @@ def calculate_all_metrics(
     """
     metrics = {}
     
+    # Convert to set for binary metrics if needed
+    if isinstance(relevant, dict):
+        relevant_set = set(relevant.keys())
+    else:
+        relevant_set = relevant
+    
     # Metrics at different K values
     for k in k_values:
-        metrics[f"precision@{k}"] = precision_at_k(retrieved, relevant, k)
-        metrics[f"recall@{k}"] = recall_at_k(retrieved, relevant, k)
-        metrics[f"f1@{k}"] = f1_at_k(retrieved, relevant, k)
-        metrics[f"hit_rate@{k}"] = hit_rate_at_k(retrieved, relevant, k)
+        metrics[f"precision@{k}"] = precision_at_k(retrieved, relevant_set, k)
+        metrics[f"recall@{k}"] = recall_at_k(retrieved, relevant_set, k)
+        metrics[f"f1@{k}"] = f1_at_k(retrieved, relevant_set, k)
+        metrics[f"hit_rate@{k}"] = hit_rate_at_k(retrieved, relevant_set, k)
+        # nDCG supports both binary and graded
         metrics[f"ndcg@{k}"] = ndcg_at_k(retrieved, relevant, k)
     
     # Metrics not dependent on K
-    metrics["mrr"] = reciprocal_rank(retrieved, relevant)
-    metrics["map"] = average_precision(retrieved, relevant)
+    metrics["mrr"] = reciprocal_rank(retrieved, relevant_set)
+    metrics["map"] = average_precision(retrieved, relevant_set)
     
     return metrics
 
@@ -287,13 +325,15 @@ def aggregate_metrics(
     if not per_query_metrics:
         return {}
     
-    # Get all metric names
-    metric_names = per_query_metrics[0].keys()
+    # Get all metric names, excluding non-numeric fields
+    excluded_fields = {'query_id', 'query_text', 'num_retrieved', 'num_relevant'}
+    metric_names = [k for k in per_query_metrics[0].keys() if k not in excluded_fields]
     
     aggregated = {}
     for metric_name in metric_names:
-        values = [m[metric_name] for m in per_query_metrics]
-        aggregated[metric_name] = float(np.mean(values))
+        values = [m[metric_name] for m in per_query_metrics if isinstance(m.get(metric_name), (int, float))]
+        if values:
+            aggregated[metric_name] = float(np.mean(values))
     
     return aggregated
 
